@@ -2,7 +2,7 @@
 <html lang="pl">
 <head>
 <meta charset="UTF-8">
-<title>Chess Siege — wielka szachownica</title>
+<title>Chess 2.0</title>
 <style>
   *{box-sizing:border-box;}
   body{
@@ -56,6 +56,7 @@
     flex-direction:column;
     justify-content:space-between;
     flex-shrink:0;
+    overflow-y:auto;
   }
   .sidePanel{
     width:150px;
@@ -74,46 +75,37 @@
   .lostRow{display:flex;flex-wrap:wrap;gap:3px;justify-content:center;margin-top:4px;min-height:20px;}
   .lostRow .icon{font-size:16px;opacity:0.35;}
   #game{display:none;}
-  #hud{
+  #turnControl{
     display:flex;
-    flex-wrap:wrap;
-    gap:14px;
+    flex-direction:column;
     align-items:center;
-    padding:8px 14px;
-    background:#1f222a;
-    border-bottom:2px solid #000;
-    position:sticky;
-    top:0;
-    z-index:5;
+    gap:8px;
   }
-  #hud .pill{
-    background:#2a2d36;
-    border-radius:14px;
-    padding:6px 12px;
+  #turnControl .turnLabel{
     font-size:13px;
+    color:#ddd;
+    text-align:center;
   }
-  #hud button{
+  #turnControl .poolLabel{
+    font-size:12px;
+    color:#aaa;
+    text-align:center;
+  }
+  #turnControl button{
     background:#39414f;
     color:#fff;
     border:1px solid #555;
     border-radius:6px;
-    padding:8px 14px;
+    padding:10px 16px;
     cursor:pointer;
     font-size:13px;
+    width:100%;
   }
-  #hud button:hover{background:#4a5468;}
-  #hud button:disabled{opacity:.4;cursor:default;}
-  #log{
-    font-size:12px;
-    color:#9aa;
-    max-width:300px;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap;
-  }
+  #turnControl button:hover{background:#4a5468;}
+  #turnControl button:disabled{opacity:.4;cursor:default;}
   #boardWrap{
     overflow:auto;
-    max-height:95vh;
+    max-height:100vh;
     background:#000;
     padding:10px;
     display:flex;
@@ -156,14 +148,14 @@
 </div>
 
 <div id="game">
-  <div id="hud">
-    <span class="pill" id="turnInfo">Tura: -</span>
-    <span class="pill" id="poolInfo">Pula: -</span>
-    <button id="endTurnBtn" onclick="endTurn()">Zakończ turę</button>
-  </div>
   <div id="boardArea">
     <div id="statsColumn">
       <div class="sidePanel" id="whiteRoster"></div>
+      <div id="turnControl">
+        <div id="turnInfo" class="turnLabel">Tura: -</div>
+        <button id="endTurnBtn" onclick="endTurn()">Zakończ turę</button>
+        <div id="poolInfo" class="poolLabel">Pula: -</div>
+      </div>
       <div class="sidePanel" id="blackRoster"></div>
     </div>
     <div id="boardWrap">
@@ -282,9 +274,11 @@ function legalMoves(u){
   const moves = [];
 
   if(u.type==='pawn'){
-    // pion rusza się 1 lub 2 pola w KAŻDYM z 8 kierunków
-    const pawnDirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
-    for(const [dx,dy] of pawnDirs){
+    // pion: 1 lub 2 pola w pionie, 1 pole w poziomie, 1 pole na ukos
+    const vertDirs = [[0,1],[0,-1]];
+    const oneStepDirs = [[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];
+
+    for(const [dx,dy] of vertDirs){
       for(const dist of [1,2]){
         const nx=u.x+dx*dist, ny=u.y+dy*dist;
         if(isWall(nx,ny)) break;
@@ -292,12 +286,20 @@ function legalMoves(u){
         if(occ){
           if(occ.color!==u.color){
             moves.push({x:nx,y:ny,capture:true});
-            break; // wróg blokuje dalszą drogę w tym kierunku
+            break; // wrog blokuje dalsza droge w tym kierunku
           }
-          continue; // własna jednostka - pion przenika przez nią, ale nie ląduje na niej
+          continue; // wlasna jednostka - przenikamy, ale nie ladujemy na niej
         }
         moves.push({x:nx,y:ny,capture:false});
       }
+    }
+
+    for(const [dx,dy] of oneStepDirs){
+      const nx=u.x+dx, ny=u.y+dy;
+      if(isWall(nx,ny)) continue;
+      const occ = unitAt(nx,ny);
+      if(occ && occ.color===u.color) continue;
+      moves.push({x:nx,y:ny,capture:!!occ});
     }
     return moves;
   }
@@ -360,15 +362,6 @@ function doMove(u, dest){
   victim ? playSound('capture') : playSound('move');
   if(victim && victim.type==='king'){
     endGame(u.color, (u.color==='white'?'Biali':'Czarni') + ' zbili króla i wygrywają!');
-    return;
-  }
-  // jesli zostal tylko 1 punkt puli (koszt krola) a krol nie ma gdzie sie ruszyc - automatyczna przegrana
-  if(pool===1){
-    const king = units.find(k=>k.alive && k.color===u.color && k.type==='king');
-    if(king && legalMoves(king).length===0){
-      const winner = u.color==='white' ? 'black' : 'white';
-      endGame(winner, (u.color==='white'?'Białym':'Czarnym') + ' został 1 punkt puli, a król nie ma gdzie się ruszyć - automatyczna porażka!');
-    }
   }
 }
 
@@ -423,6 +416,7 @@ function startGame(color){
   turnColor = 'white';
   pool = TURN_POOL;
   units.forEach(u=>u.moved=false);
+  renderRosters(); // wypelnia panele PRZED pomiarem ich wysokosci w sizeCanvas()
   sizeCanvas();
   refreshHud();
   render();
@@ -519,13 +513,11 @@ function finishBotTurn(){
 
 /* ====================== UI / RENDER ====================== */
 function computeTileSize(){
-  const hud = document.getElementById('hud');
   const statsCol = document.getElementById('statsColumn');
-  const hudHeight = hud ? hud.offsetHeight : 0;
   const panelsWidth = statsCol ? statsCol.offsetWidth : 150;
-  const reserve = 70; // odstepy/padding kontenerow + zapas na zaokraglenia
+  const reserve = 50; // odstepy/padding kontenerow + zapas na zaokraglenia
   const availW = window.innerWidth - panelsWidth - reserve;
-  const availH = window.innerHeight - hudHeight - reserve;
+  const availH = window.innerHeight - reserve;
   TILE = Math.max(16, Math.floor(Math.min(availW/COLS, availH/ROWS)));
 }
 
@@ -544,23 +536,12 @@ window.addEventListener('resize', ()=>{
   render();
 });
 
-function hasAffordableMove(color){
-  return units.some(u=>{
-    if(!u.alive || u.color!==color || u.moved) return false;
-    if(COST[u.type]>pool) return false;
-    return legalMoves(u).length>0;
-  });
-}
-
 function refreshHud(){
   document.getElementById('turnInfo').textContent =
-    'Tura: ' + (turnColor==='white'?'BIAŁYCH':'CZARNYCH') + (turnColor===humanColor?' (Ty)':' (bot)');
+    'Ruch ' + (turnColor==='white'?'białych':'czarnych') + (turnColor===humanColor?' (Ty)':' (bot)');
   document.getElementById('poolInfo').textContent = 'Pula ruchów: ' + pool + ' / ' + TURN_POOL;
   const canAct = turnColor===humanColor && !gameOver;
-  const mustKeepPlaying = canAct && pool>0 && hasAffordableMove(humanColor);
-  const endTurnBtn = document.getElementById('endTurnBtn');
-  endTurnBtn.disabled = !canAct || mustKeepPlaying;
-  endTurnBtn.textContent = mustKeepPlaying ? 'Wykorzystaj całą pulę' : 'Zakończ turę';
+  document.getElementById('endTurnBtn').disabled = !canAct;
   renderRosters();
 }
 
@@ -594,6 +575,11 @@ function renderRosters(){
   });
 }
 
+function displayY(y){
+  // gracz zawsze widzi swoje figury na dole, niezaleznie od wybranego koloru
+  return humanColor==='white' ? (ROWS-1-y) : y;
+}
+
 function render(){
   const canvas = document.getElementById('board');
   const ctx = canvas.getContext('2d');
@@ -612,17 +598,17 @@ function render(){
   if(selectedUnit){
     for(const m of legalMovesCache){
       ctx.fillStyle = m.capture ? 'rgba(220,60,60,0.55)' : 'rgba(80,220,120,0.45)';
-      ctx.fillRect(m.x*TILE, m.y*TILE, TILE, TILE);
+      ctx.fillRect(m.x*TILE, displayY(m.y)*TILE, TILE, TILE);
     }
     ctx.strokeStyle = '#ffe066';
     ctx.lineWidth = 2;
-    ctx.strokeRect(selectedUnit.x*TILE+1, selectedUnit.y*TILE+1, TILE-2, TILE-2);
+    ctx.strokeRect(selectedUnit.x*TILE+1, displayY(selectedUnit.y)*TILE+1, TILE-2, TILE-2);
     ctx.lineWidth = 1;
   }
 
   // jednostki - pion to kolo, figury ciezsze od piona to kwadrat
   units.filter(u=>u.alive).forEach(u=>{
-    const cx = u.x*TILE+TILE/2, cy = u.y*TILE+TILE/2;
+    const cx = u.x*TILE+TILE/2, cy = displayY(u.y)*TILE+TILE/2;
     ctx.beginPath();
     if(u.type==='pawn'){
       ctx.arc(cx,cy,TILE*0.4,0,Math.PI*2);
@@ -630,15 +616,10 @@ function render(){
       const s = TILE*0.4;
       ctx.rect(cx-s, cy-s, s*2, s*2);
     }
-    const isKing = u.type==='king';
-    ctx.fillStyle = isKing
-      ? (u.color==='white' ? '#f0d978' : '#5c4a12')
-      : (u.color==='white' ? '#f2f0e6' : '#1c1c1c');
+    ctx.fillStyle = u.color==='white' ? '#f2f0e6' : '#1c1c1c';
     ctx.fill();
-    ctx.strokeStyle = isKing ? '#c9a227' : (u.color==='white' ? '#555' : '#ddd');
-    ctx.lineWidth = isKing ? 2.5 : 1;
+    ctx.strokeStyle = u.color==='white' ? '#555' : '#ddd';
     ctx.stroke();
-    ctx.lineWidth = 1;
     ctx.fillStyle = u.color==='white' ? '#111' : '#fff';
     ctx.font = 'bold ' + Math.floor(TILE*0.45) + 'px sans-serif';
     ctx.textAlign='center'; ctx.textBaseline='middle';
@@ -653,8 +634,9 @@ document.getElementById('board').addEventListener('click', (e)=>{
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
   const x = Math.floor((e.clientX-rect.left)*scaleX/TILE);
-  const y = Math.floor((e.clientY-rect.top)*scaleY/TILE);
-  if(x<0||x>=COLS||y<0||y>=ROWS) return;
+  const dispY = Math.floor((e.clientY-rect.top)*scaleY/TILE);
+  if(x<0||x>=COLS||dispY<0||dispY>=ROWS) return;
+  const y = displayY(dispY); // displayY jest wlasna odwrotnoscia (symetryczne odbicie)
 
   const clicked = unitAt(x,y);
 
