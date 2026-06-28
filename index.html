@@ -131,11 +131,12 @@
 
 <div id="setup">
   <h1>Chess 2.0</h1>
-  <strong>Zbij króla przeciwnika, aby wygrać.</strong>
+  <strong>Zbij króla przeciwnika, aby wygrać</strong>
   <p>Każda tura to pula 10 punktów ruchu<br>
-    Część figur porusza się nieco inaczej niż w szachach 1.0<br>
-     (pion=2, król=1, goniec=3, wieża=4, skoczek=4, hetman=7).</p>
-  <p>Wybierz poziom trudności przeciwnika</p>
+  król=1, pion=2, goniec=4, wieża=4, skoczek=4, hetman=6</p>
+  <p>Gracz może przeskakiwać przez swoje figury, ale nie przeciwnika</p>
+  <p>Pionki i skoczki poruszają się nieco inaczej niż w szachach 1.0</p><br>
+  <strong>Wybierz poziom trudności</strong>
   <div id="diffPicker">
     <button class="diffBtn" data-diff="easy" onclick="setDifficulty('easy')">Łatwy</button>
     <button class="diffBtn" data-diff="medium" onclick="setDifficulty('medium')">Średni</button>
@@ -176,7 +177,7 @@ const COLS = 10;
 const ROWS = 12;
 const TURN_POOL = 10;      // pula punktów ruchu na turę
 
-const COST = { pawn:2, king:1, knight:4, bishop:3, rook:4, queen:7 };
+const COST = { pawn:2, king:1, knight:4, bishop:4, rook:4, queen:6 };
 const PIECE_LETTER = { pawn:'P', king:'K', knight:'N', bishop:'B', rook:'R', queen:'Q' };
 const PIECE_ORDER = ['king','queen','rook','bishop','knight','pawn'];
 const PIECE_NAME = { king:'Król', queen:'Hetman', rook:'Wieża', bishop:'Goniec', knight:'Skoczek', pawn:'Pion' };
