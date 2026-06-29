@@ -103,6 +103,9 @@
   }
   #turnControl button:hover{background:#4a5468;}
   #turnControl button:disabled{opacity:.4;cursor:default;}
+  #moveNav{display:flex;gap:4px;width:100%;}
+  #moveNav button{padding:8px 4px;font-size:14px;}
+  #moveInfo{font-size:11px;color:#999;text-align:center;}
   #boardWrap{
     overflow:auto;
     max-height:100vh;
@@ -156,6 +159,13 @@
         <div id="turnInfo" class="turnLabel">Tura: -</div>
         <button id="endTurnBtn" onclick="endTurn()">Zakończ turę</button>
         <div id="poolInfo" class="poolLabel">Pula: -</div>
+        <div id="moveNav">
+          <button id="btnFirst" onclick="goToStart()" title="Początek gry">⏮</button>
+          <button id="btnPrev" onclick="stepBack()" title="Poprzedni ruch (←)">◀</button>
+          <button id="btnNext" onclick="stepForward()" title="Następny ruch (→)">▶</button>
+          <button id="btnLast" onclick="goToLive()" title="Najnowszy ruch">⏭</button>
+        </div>
+        <div id="moveInfo">Ruch: - / -</div>
       </div>
       <div class="sidePanel" id="blackRoster"></div>
     </div>
@@ -178,7 +188,6 @@ const ROWS = 12;
 const TURN_POOL = 10;      // pula punktów ruchu na turę
 
 const COST = { pawn:2, king:1, knight:4, bishop:4, rook:4, queen:6 };
-const PIECE_LETTER = { pawn:'P', king:'K', knight:'N', bishop:'B', rook:'R', queen:'Q' };
 const PIECE_ORDER = ['king','queen','rook','bishop','knight','pawn'];
 const PIECE_NAME = { king:'Król', queen:'Hetman', rook:'Wieża', bishop:'Goniec', knight:'Skoczek', pawn:'Pion' };
 const STARTING_COUNT = { king:1, queen:1, rook:2, bishop:2, knight:4, pawn:10 };
@@ -214,6 +223,8 @@ let selectedUnit = null;
 let legalMovesCache = [];
 let gameOver = false;
 let nextId = 1;
+let history = [];          // snapshoty stanu po każdym ruchu figury, do przewijania historii
+let viewIndex = -1;        // ktory snapshot jest aktualnie wyswietlany (history.length-1 = stan zywy)
 
 /* ====================== MAPA (wielki prostokąt) ====================== */
 function buildBoard(){
@@ -275,32 +286,32 @@ function legalMoves(u){
   const moves = [];
 
   if(u.type==='pawn'){
-    // pion: 1 lub 2 pola w pionie, 1 pole w poziomie, 1 pole na ukos
-    const vertDirs = [[0,1],[0,-1]];
-    const oneStepDirs = [[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];
+    // pion: zawsze 1 lub 2 pola do przodu (bez bicia), 1 pole do tylu (bez bicia),
+    // bicie tylko 1 pole na ukos do przodu - jak standardowy pionek
+    const forward = u.color==='white' ? 1 : -1;
 
-    for(const [dx,dy] of vertDirs){
-      for(const dist of [1,2]){
-        const nx=u.x+dx*dist, ny=u.y+dy*dist;
-        if(isWall(nx,ny)) break;
-        const occ = unitAt(nx,ny);
-        if(occ){
-          if(occ.color!==u.color){
-            moves.push({x:nx,y:ny,capture:true});
-            break; // wrog blokuje dalsza droge w tym kierunku
-          }
-          continue; // wlasna jednostka - przenikamy, ale nie ladujemy na niej
-        }
+    for(const dist of [1,2]){
+      const nx=u.x, ny=u.y+forward*dist;
+      if(isWall(nx,ny)) break;
+      const occ = unitAt(nx,ny);
+      if(occ) break; // do przodu pion nie bije - wrog lub wlasna figura blokuje dalsza droge
+      moves.push({x:nx,y:ny,capture:false});
+    }
+
+    {
+      const nx=u.x, ny=u.y-forward;
+      if(!isWall(nx,ny) && !unitAt(nx,ny)){
         moves.push({x:nx,y:ny,capture:false});
       }
     }
 
-    for(const [dx,dy] of oneStepDirs){
-      const nx=u.x+dx, ny=u.y+dy;
+    for(const dx of [-1,1]){
+      const nx=u.x+dx, ny=u.y+forward;
       if(isWall(nx,ny)) continue;
       const occ = unitAt(nx,ny);
-      if(occ && occ.color===u.color) continue;
-      moves.push({x:nx,y:ny,capture:!!occ});
+      if(occ && occ.color!==u.color){
+        moves.push({x:nx,y:ny,capture:true});
+      }
     }
     return moves;
   }
@@ -361,10 +372,47 @@ function doMove(u, dest){
   u.moved = true;
   pool -= COST[u.type];
   victim ? playSound('capture') : playSound('move');
+  recordMove();
   if(victim && victim.type==='king'){
     endGame(u.color, (u.color==='white'?'Biali':'Czarni') + ' zbili króla i wygrywają!');
   }
 }
+
+/* ====================== HISTORIA RUCHÓW ====================== */
+function recordMove(){
+  history.push({
+    units: units.map(u=>({...u})),
+    pool, turnColor
+  });
+  viewIndex = history.length-1;
+}
+
+function getViewState(){
+  if(viewIndex===history.length-1) return {units, pool, turnColor};
+  const h = history[viewIndex];
+  return {units:h.units, pool:h.pool, turnColor:h.turnColor};
+}
+
+function isBrowsing(){ return viewIndex!==history.length-1; }
+
+function goToMove(idx){
+  if(history.length===0) return;
+  viewIndex = Math.max(0, Math.min(history.length-1, idx));
+  selectedUnit = null; legalMovesCache = [];
+  refreshHud(); render();
+}
+function stepBack(){ goToMove(viewIndex-1); }
+function stepForward(){ goToMove(viewIndex+1); }
+function goToStart(){ goToMove(0); }
+function goToLive(){ goToMove(history.length-1); }
+
+document.addEventListener('keydown', (e)=>{
+  if(document.getElementById('game').style.display==='none') return;
+  if(e.key==='ArrowLeft'){ stepBack(); e.preventDefault(); }
+  else if(e.key==='ArrowRight'){ stepForward(); e.preventDefault(); }
+  else if(e.key==='Home'){ goToStart(); e.preventDefault(); }
+  else if(e.key==='End'){ goToLive(); e.preventDefault(); }
+});
 
 /* ====================== DŹWIĘKI (Web Audio, bez plików) ====================== */
 let audioCtx = null;
@@ -417,7 +465,9 @@ function startGame(color){
   turnColor = 'white';
   pool = TURN_POOL;
   units.forEach(u=>u.moved=false);
-  renderRosters(); // wypelnia panele PRZED pomiarem ich wysokosci w sizeCanvas()
+  history = []; viewIndex = -1;
+  recordMove(); // stan startowy jako pierwszy punkt historii
+  renderRosters(units); // wypelnia panele PRZED pomiarem ich wysokosci w sizeCanvas()
   sizeCanvas();
   refreshHud();
   render();
@@ -425,7 +475,7 @@ function startGame(color){
 }
 
 function endTurn(){
-  if(gameOver) return;
+  if(gameOver || isBrowsing()) return;
   selectedUnit = null; legalMovesCache=[];
   turnColor = turnColor==='white' ? 'black' : 'white';
   pool = TURN_POOL;
@@ -538,21 +588,29 @@ window.addEventListener('resize', ()=>{
 });
 
 function refreshHud(){
+  const state = getViewState();
+  const browsing = isBrowsing();
   document.getElementById('turnInfo').textContent =
-    'Ruch ' + (turnColor==='white'?'białych':'czarnych') + (turnColor===humanColor?' (Ty)':' (bot)');
-  document.getElementById('poolInfo').textContent = 'Pula ruchów: ' + pool + ' / ' + TURN_POOL;
-  const canAct = turnColor===humanColor && !gameOver;
+    'Ruch ' + (state.turnColor==='white'?'białych':'czarnych') + (state.turnColor===humanColor?' (Ty)':' (bot)');
+  document.getElementById('poolInfo').textContent = 'Pula ruchów: ' + state.pool + ' / ' + TURN_POOL;
+  const canAct = state.turnColor===humanColor && !gameOver && !browsing;
   document.getElementById('endTurnBtn').disabled = !canAct;
-  renderRosters();
+  document.getElementById('moveInfo').textContent = 'Ruch: ' + (viewIndex<0?'-':viewIndex) + ' / ' + (history.length-1);
+  document.getElementById('btnFirst').disabled = viewIndex<=0;
+  document.getElementById('btnPrev').disabled = viewIndex<=0;
+  document.getElementById('btnNext').disabled = viewIndex>=history.length-1;
+  document.getElementById('btnLast').disabled = viewIndex>=history.length-1;
+  renderRosters(state.units);
 }
 
-function renderRosters(){
+function renderRosters(unitsArg){
+  const srcUnits = unitsArg || units;
   ['white','black'].forEach(color=>{
     const panel = document.getElementById(color+'Roster');
     if(!panel) return;
     const alive = {}; const lost = [];
     PIECE_ORDER.forEach(t=>alive[t]=0);
-    units.filter(u=>u.color===color).forEach(u=>{
+    srcUnits.filter(u=>u.color===color).forEach(u=>{
       if(u.alive) alive[u.type]++;
       else lost.push(u.type);
     });
@@ -595,8 +653,11 @@ function render(){
     }
   }
 
-  // podswietlenie legalnych ruchow
-  if(selectedUnit){
+  const state = getViewState();
+  const browsing = isBrowsing();
+
+  // podswietlenie legalnych ruchow (tylko w stanie zywym, nie w podgladzie historii)
+  if(selectedUnit && !browsing){
     for(const m of legalMovesCache){
       ctx.fillStyle = m.capture ? 'rgba(220,60,60,0.55)' : 'rgba(80,220,120,0.45)';
       ctx.fillRect(m.x*TILE, displayY(m.y)*TILE, TILE, TILE);
@@ -607,29 +668,24 @@ function render(){
     ctx.lineWidth = 1;
   }
 
-  // jednostki - pion to kolo, figury ciezsze od piona to kwadrat
-  units.filter(u=>u.alive).forEach(u=>{
+  // jednostki - klasyczne symbole szachowe, same figurki bez okrągłych obwódek,
+  // biale i szare (rozne kolory wedlug strony) z cienkim ciemnym konturem dla ostrosci.
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = Math.floor(TILE*0.82) + 'px "DejaVu Sans","Segoe UI Symbol","Arial Unicode MS",sans-serif';
+  ctx.lineJoin = 'round';
+  state.units.filter(u=>u.alive).forEach(u=>{
     const cx = u.x*TILE+TILE/2, cy = displayY(u.y)*TILE+TILE/2;
-    ctx.beginPath();
-    if(u.type==='pawn'){
-      ctx.arc(cx,cy,TILE*0.4,0,Math.PI*2);
-    } else {
-      const s = TILE*0.4;
-      ctx.rect(cx-s, cy-s, s*2, s*2);
-    }
-    ctx.fillStyle = u.color==='white' ? '#f2f0e6' : '#1c1c1c';
-    ctx.fill();
-    ctx.strokeStyle = u.color==='white' ? '#555' : '#ddd';
-    ctx.stroke();
-    ctx.fillStyle = u.color==='white' ? '#111' : '#fff';
-    ctx.font = 'bold ' + Math.floor(TILE*0.45) + 'px sans-serif';
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText(PIECE_LETTER[u.type], cx, cy+1);
+    const symbol = UNICODE_PIECE.white[u.type]; // wspolny ksztalt - kolor ustalany przez nas, nie przez font
+    ctx.fillStyle = u.color==='white' ? '#d6d6d6' : '#5b5f68';
+    ctx.lineWidth = Math.max(1, TILE*0.05);
+    ctx.strokeStyle = '#15171c';
+    ctx.strokeText(symbol, cx, cy+1);
+    ctx.fillText(symbol, cx, cy+1);
   });
 }
 
 document.getElementById('board').addEventListener('click', (e)=>{
-  if(gameOver || turnColor!==humanColor) return;
+  if(gameOver || turnColor!==humanColor || isBrowsing()) return;
   const canvas = e.target;
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
